@@ -84,7 +84,7 @@ with graph.as_default():
   last_layer_biases = tf.Variable(tf.zeros([2], dtype = tf.float32))
 
   ### Computations
-  embedded_inputs = tf.div(tf.reduce_sum(tf.mul(tf.nn.embedding_lookup(embedding_layer,
+  embedded_inputs = tf.div(tf.reduce_sum(tf.multiply(tf.nn.embedding_lookup(embedding_layer,
                                                                        feats_placeholder),
                                                 tf.expand_dims(masks_placeholder,
                                                                2)),
@@ -94,11 +94,11 @@ with graph.as_default():
 
   value = tf.matmul(embedded_inputs, last_layer_weights) + last_layer_biases
   normalized_probs = tf.nn.softmax(value)
-  pred_vals = tf.cast(tf.argmax(normalized_probs, dimension = 1), tf.int32)
+  pred_vals = tf.cast(tf.argmax(normalized_probs, axis = 1), tf.int32)
 
   one_hot_gold = tf.one_hot(gold_labels_placeholder, 2)
 
-  loss = tf.reduce_mean(-tf.log(tf.reduce_sum(tf.mul(normalized_probs,
+  loss = tf.reduce_mean(-tf.log(tf.reduce_sum(tf.multiply(normalized_probs,
                                               one_hot_gold), 1))) + l2_coeff * tf.nn.l2_loss(last_layer_weights)
   optimizer = tf.train.AdamOptimizer(learning_rate).minimize(loss)
 
@@ -109,9 +109,9 @@ with graph.as_default():
 
   optimizer = tf.train.AdamOptimizer(learning_rate).minimize(loss)
 
-  loss_summary = tf.scalar_summary("loss", loss)
-  acc_summary = tf.scalar_summary("acc", accuracy)
-  summaries = tf.merge_summary([loss_summary, acc_summary])
+  loss_summary = tf.summary.scalar("loss", loss)
+  acc_summary = tf.summary.scalar("acc", accuracy)
+  summaries = tf.summary.merge([loss_summary, acc_summary])
 
 ### model_inputs
 # Gets a batch and prepares inputs for the placeholders.
@@ -170,9 +170,9 @@ def model_inputs(examples, batch_size = 0):
 ### TRAINING
 with tf.Session(graph = graph) as session:
   session.run(tf.initialize_all_variables())
-  train_writer = tf.train.SummaryWriter("ll/train")
-  dev_writer = tf.train.SummaryWriter("ll/dev")
-  valid_writer = tf.train.SummaryWriter("ll/valid")
+  train_writer = tf.summary.FileWriter("ll/train")
+  dev_writer = tf.summary.FileWriter("ll/dev")
+  valid_writer = tf.summary.FileWriter("ll/valid")
 
   # Stopping conditions.
   steps_per_epoch = int(len(train_lines) / batch_size) + 1
