@@ -41,6 +41,7 @@ sixgrams = [line.strip() for line in open("ngram_data/sixgrams.txt").readlines()
 outfile = open(sys.argv[2], "w")
 
 for i, obj in enumerate(objs):
+  identifier = obj["identifier"]
   image = obj["structured_rep"]
   sentence = obj["sentence"]
   final_eval = obj["label"]
@@ -492,5 +493,5 @@ for i, obj in enumerate(objs):
   for feature in features:
     if not feature in new_features:
       new_features.append(feature)
-  outfile.write(judgment + " " + " ".join(new_features) + "\n")
+  outfile.write(identifier + "\t" + judgment + " " + " ".join(new_features) + "\n")
 

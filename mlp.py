@@ -102,6 +102,7 @@ with graph.as_default():
                                               one_hot_gold), 1))) + l2_coeff * tf.nn.l2_loss(last_layer_weights)
   optimizer = tf.train.AdamOptimizer(learning_rate).minimize(loss)
 
+  sample_accuracies = tf.equal(gold_labels_placeholder, pred_vals)
   accuracy = tf.reduce_sum(tf.cast(tf.equal(gold_labels_placeholder,
                                             pred_vals),
                                    tf.float32))/ tf.cast(batch_size_placeholder,
@@ -131,14 +132,16 @@ def model_inputs(examples, batch_size = 0):
   fvs = [ ]
   judgments = [ ]
   largest_size = 0
+  ids = [ ]
 
   for sample in samples:
     feats = sample.strip().split(" ")[1:]
     judgment = 1
-    if sample.strip().split(" ")[0] == "0":
+    if sample.strip().split("\t")[1].split(" ")[0] == "0":
       judgment = 0
 
     judgments.append(judgment)
+    ids.append(sample.strip().split("\t")[0])
 
     # Create the feature vector: look up the ID for the feature in the
     # previously constructed dictionary.
@@ -165,7 +168,7 @@ def model_inputs(examples, batch_size = 0):
     masks.append([ 1 ] * fv_len + [ 0 ] * pad_len)
     num_feats.append(fv_len)
 
-  return (padded_fvs, masks, judgments, num_feats)
+  return (ids, padded_fvs, masks, judgments, num_feats)
 
 ### TRAINING
 with tf.Session(graph = graph) as session:
@@ -184,10 +187,11 @@ with tf.Session(graph = graph) as session:
 
   while keep_training:
     train_batch = model_inputs(train_lines, batch_size = batch_size)
-    feed_dict = { feats_placeholder: train_batch[0],
-                  gold_labels_placeholder: train_batch[2],
-                  masks_placeholder : train_batch[1],
-                  num_feats_placeholder : train_batch[3],
+    ids = train_batch[0]
+    feed_dict = { feats_placeholder: train_batch[1],
+                  gold_labels_placeholder: train_batch[3],
+                  masks_placeholder : train_batch[2],
+                  num_feats_placeholder : train_batch[4],
                   batch_size_placeholder : batch_size}
 
     step_acc, step_loss, step_summ,  _ = session.run([accuracy,
@@ -200,11 +204,11 @@ with tf.Session(graph = graph) as session:
     # Run on validation step every epoch.
     if step_num % steps_per_epoch == 0 and step_num > 0:
       valid_set = model_inputs(valid_lines)
-      feed_dict = { feats_placeholder : valid_set[0],
-                    gold_labels_placeholder : valid_set[2],
-                    masks_placeholder : valid_set[1],
-                    num_feats_placeholder : valid_set[3],
-                    batch_size_placeholder : len(valid_set[0])}
+      feed_dict = { feats_placeholder : valid_set[1],
+                    gold_labels_placeholder : valid_set[3],
+                    masks_placeholder : valid_set[2],
+                    num_feats_placeholder : valid_set[4],
+                    batch_size_placeholder : len(valid_set[1])}
       valid_acc, step_loss,  step_summ = session.run([accuracy,
                                                      loss,
                                                      summaries],
@@ -227,42 +231,64 @@ with tf.Session(graph = graph) as session:
 
     # Run on development set if validation set improved. 
     if valid_is_better:
+      dev_file = open("mlp-" + str(step_num) + "-dev.results", "w")
+      train_file = open("mlp-" + str(step_num) + "-train.results", "w")
+      test_file = open("mlp-" + str(step_num) + "-test.results", "w")
+
       dev_set = model_inputs(dev_lines)
-      feed_dict = { feats_placeholder : dev_set[0],
-                    gold_labels_placeholder : dev_set[2],
-                    masks_placeholder : dev_set[1],
-                    num_feats_placeholder : dev_set[3],
-                    batch_size_placeholder : len(dev_set[0])}
-      dev_acc, step_loss, step_summ = session.run([accuracy,
+      feed_dict = { feats_placeholder : dev_set[1],
+                    gold_labels_placeholder : dev_set[3],
+                    masks_placeholder : dev_set[2],
+                    num_feats_placeholder : dev_set[4],
+                    batch_size_placeholder : len(dev_set[1])}
+      dev_ids = dev_set[0]
+      dev_acc, dev_sample_accs, step_loss, step_summ = session.run([accuracy,
+                                                   sample_accuracies,
                                                    loss,
                                                    summaries],
                                                   feed_dict = feed_dict)
       print("D: " + str(dev_acc))
       dev_writer.add_summary(step_summ, step_num)
+
+      assert len(dev_ids) == len(dev_sample_accs)
+      for identifier, correct in zip(dev_ids, dev_sample_accs):
+        dev_file.write(identifier + "\t" + str(correct) + "\n")
+
       test_set = model_inputs(test_lines)
-      feed_dict = { feats_placeholder : test_set[0],
-                    gold_labels_placeholder : test_set[2],
-                    masks_placeholder : test_set[1],
-                    num_feats_placeholder : test_set[3],
-                    batch_size_placeholder : len(test_set[0])}
-      test_acc = session.run([accuracy],
-                                                  feed_dict = feed_dict)
+      feed_dict = { feats_placeholder : test_set[1],
+                    gold_labels_placeholder : test_set[3],
+                    masks_placeholder : test_set[2],
+                    num_feats_placeholder : test_set[4],
+                    batch_size_placeholder : len(test_set[1])}
+      test_ids = test_set[0]
+      test_acc, test_sample_accs = session.run([accuracy, sample_accuracies], feed_dict = feed_dict)
+      assert len(test_ids) == len(test_sample_accs)
+      for identifier, correct in zip(test_ids, test_sample_accs):
+        test_file.write(identifier + "\t" + str(correct) + "\n")
+
       full_train_acc = 0
       for i in range(int(len(train_lines) / batch_size + 1)):
         partial_train = train_lines[i * batch_size:min(len(train_lines),
                                                       (i + 1) * batch_size)]
         partial_train_set = model_inputs(partial_train)
-        feed_dict = { feats_placeholder : partial_train_set[0],
-                      gold_labels_placeholder : partial_train_set[2],
-                      masks_placeholder : partial_train_set[1],
-                      num_feats_placeholder : partial_train_set[3],
-                      batch_size_placeholder : len(partial_train_set[0])}
-        acc = session.run([accuracy],
-                                                    feed_dict = feed_dict)
-        full_train_acc += acc[0] * len(partial_train_set[0])
+        feed_dict = { feats_placeholder : partial_train_set[1],
+                      gold_labels_placeholder : partial_train_set[3],
+                      masks_placeholder : partial_train_set[2],
+                      num_feats_placeholder : partial_train_set[4],
+                      batch_size_placeholder : len(partial_train_set[1])}
+        train_ids = partial_train_set[0]
+        acc, sample_acc = session.run([accuracy, sample_accuracies], feed_dict = feed_dict)
+        assert len(train_ids) == len(sample_acc)
+        for identifier, correct in zip(train_ids, sample_acc):
+          train_file.write(identifier + "\t" + str(correct) + "\n")
+        full_train_acc += acc * len(partial_train_set[1])
       full_train_acc /= len(train_lines)
+
+      dev_file.close()
+      train_file.close()
+      test_file.close()
     step_num += 1
 
   print(dev_acc)
-  print(test_acc[0])
-  print(hidden_acc[0])
+  print(test_acc)
+  print(full_train_acc)
